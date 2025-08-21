@@ -1,0 +1,83 @@
+package com.ravindu.store.services;
+
+import com.ravindu.store.dtos.CheckOutRequest;
+import com.ravindu.store.dtos.CheckOutResponse;
+import com.ravindu.store.entities.Order;
+import com.ravindu.store.exceptions.CartEmptyException;
+import com.ravindu.store.exceptions.CartNotFoundException;
+import com.ravindu.store.repositories.CartRepository;
+import com.ravindu.store.repositories.OrderRepository;
+import com.stripe.exception.StripeException;
+import com.stripe.model.checkout.Session;
+import com.stripe.param.checkout.SessionCreateParams;
+import lombok.AllArgsConstructor;
+import lombok.RequiredArgsConstructor;
+import org.antlr.v4.runtime.misc.LogManager;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.util.Map;
+
+@Service
+@RequiredArgsConstructor
+public class CheckoutService {
+    private final CartRepository cartRepository;
+    private final AuthService authService;
+    private final OrderRepository orderRepository;
+    private final CartService cartService;
+
+    @Value("${websiteUrl}")
+    private String websiteUrl;
+
+    @Transactional
+    public CheckOutResponse checkout(CheckOutRequest request) throws StripeException {
+        var cart=cartRepository.getCartWithItems(request.getCartId()).orElse(null);
+        if (cart==null){
+           throw new CartNotFoundException();
+        }
+
+        if (cart.isEmpty()){
+            throw new CartEmptyException();
+        }
+
+
+        var order= Order.fromCart(cart,authService.getCurrentUser());
+        orderRepository.save(order);
+
+        try{
+            //create a checkout session
+            var buildr=SessionCreateParams.builder()
+                    .setMode(SessionCreateParams.Mode.PAYMENT)
+                    .setSuccessUrl(websiteUrl+"/checkout-success?orderId="+order.getId())
+                    .setCancelUrl(websiteUrl+"/checkout-cancel.html");
+
+            order.getItems().forEach(item->{
+                var lineItem=  SessionCreateParams.LineItem.builder()
+                        .setQuantity(Long.valueOf(item.getQuantity()))
+                        .setPriceData(
+                                SessionCreateParams.LineItem.PriceData.builder()
+                                        .setCurrency("usd")
+                                        .setUnitAmountDecimal(item.getUnitPrice().multiply(BigDecimal.valueOf(100)))
+                                        .setProductData(
+                                                SessionCreateParams.LineItem.PriceData.ProductData.builder()
+                                                        .setName(item.getProduct().getName())
+                                                        .build()
+                                        )
+                                        .build()
+                        ).build();
+                buildr.addLineItem(lineItem);
+            });
+
+            var session= Session.create(buildr.build());
+            cartService.clearCart(cart.getId());
+            return new CheckOutResponse(order.getId(),session.getUrl());
+        } catch (StripeException ex) {
+            orderRepository.delete(order);
+            throw ex;
+        }
+
+    }
+}
