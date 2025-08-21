@@ -25,3 +25,11 @@ Clone the repository:
 ```bash
 git clone https://github.com/Ravindu-Nirosh/store-api.git
 cd store-api
+
+
+## 📖 API Documentation (Swagger)
+
+You can explore the live API documentation here:
+
+👉 [Live Swagger UI](https://store-api-production-bcd6.up.railway.app/swagger-ui/index.html)
+- 👉 [Local Swagger UI](http://localhost:8080/swagger-ui/index.html)
